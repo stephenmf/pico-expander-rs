@@ -10,10 +10,16 @@ embedded-hal = { version = "0.2.5", features = ["unproven"] }
 
 defmt = "0.3"
 defmt-rtt = "0.3"
-panic-probe = { version = "0.3", features = ["print-defmt"] }
+# panic-probe = { version = "0.3", features = ["print-defmt"] }
+panic-halt = "0.2"
 
 # Using a Pico by default on this template
-rp-pico = "0.5"
+rp-pico = "0.6"
+
+# extra for usb serial example
+usb-device = "0.2.9"
+usbd-serial = "0.1"
+heapless = "0.7"
 
 # cargo build/run
 [profile.dev]
