@@ -12,7 +12,11 @@
 #![no_std]
 #![no_main]
 
-use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
+mod decoder;
+mod led;
+
+// use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
+
 // The macro for our start-up function
 use rp_pico::entry;
 
@@ -34,48 +38,16 @@ use usb_device::{class_prelude::*, prelude::*};
 // USB Communications Class Device support
 use usbd_serial::SerialPort;
 
-// Used to demonstrate writing formatted strings
 use core::fmt::Write;
 use heapless::String;
 
-enum DecodeState {
-    GetCommand,
-    _GetValue,
-    _GetNextValue,
-    _RunCommand,
-}
-
-struct Decoder {
-    state: DecodeState,
-    _target: u8,
-    _value: u16,
-}
-
-impl Decoder {
-    fn new() -> Decoder {
-        Decoder {
-            state: DecodeState::GetCommand,
-            _target: 0,
-            _value: 0,
-        }
-    }
-    fn run(&mut self, input: &u8) -> String<64> {
-        match self.state {
-            _ => match input {
-                _ => {
-                    let mut text: String<64> = String::new();
-                    writeln!(&mut text, "unrecognised: '{}'\r", input).unwrap();
-                    text
-                }
-            },
-        }
-    }
-}
+use decoder::{Commands, DecodeResult, Decoder};
+use led::Led;
 
 /// Entry point to our bare-metal application.
 ///
 /// The `#[entry]` macro ensures the Cortex-M start-up code calls this function
-/// as soon as all global variables are initialised.                        let _ = serial.write(decoder.run(&b));
+/// as soon as all global variables are initialised.
 
 #[entry]
 fn main() -> ! {
@@ -102,16 +74,14 @@ fn main() -> ! {
 
     // #[cfg(feature = "rp2040-e5")]
     // {
-        let sio = hal::Sio::new(pac.SIO);
-        let pins = rp_pico::Pins::new(
-            pac.IO_BANK0,
-            pac.PADS_BANK0,
-            sio.gpio_bank0,
-            &mut pac.RESETS,
-        );
+    let sio = hal::Sio::new(pac.SIO);
+    let pins = rp_pico::Pins::new(
+        pac.IO_BANK0,
+        pac.PADS_BANK0,
+        sio.gpio_bank0,
+        &mut pac.RESETS,
+    );
     // }
-
-    let mut led_pin = pins.led.into_push_pull_output();
 
     // Set up the USB driver
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
@@ -137,17 +107,19 @@ fn main() -> ! {
     let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS);
     let mut now = timer.get_counter();
 
+    let mut led = Led::new(pins.led.into_push_pull_output());
+
     let mut decoder = Decoder::new();
     loop {
         // blink the led
-        let check = timer.get_counter();
-        if (check - now).to_millis() > 500 {
-            if led_pin.is_set_high().unwrap() {
-                led_pin.set_low().unwrap();
-            } else {
-                led_pin.set_high().unwrap()
+        if led.rate > 0 {
+            let check = timer.get_counter();
+            if (check - now).to_millis() > led.rate {
+                led.toggle();
+                now = check;
             }
-            now = check;
+        } else {
+            led.off();
         }
         // Check for new usb data
         if usb_dev.poll(&mut [&mut serial]) {
@@ -161,19 +133,49 @@ fn main() -> ! {
                 }
                 Ok(count) => {
                     // Decode the input
-                    for b in buf.iter().take(count) {
-                        let text = decoder.run(b);
-                        let bytes = text.as_bytes();
-                        if !bytes.is_empty() {
-                            // Send response to the host
-                            let mut out = &bytes[..bytes.len()];
-                            while !out.is_empty() {
-                                match serial.write(out) {
-                                    Ok(len) => out = &out[len..],
-                                    // On error, just drop unwritten data.
-                                    // One possible error is Err(WouldBlock), meaning the USB
-                                    // write buffer is full.
-                                    Err(_) => break,
+                    for c in buf.iter().take(count) {
+                        match decoder.run(c) {
+                            DecodeResult::None => {}
+                            DecodeResult::Text(text) => {
+                                let bytes = text.as_bytes();
+                                if !bytes.is_empty() {
+                                    // Send response to the host
+                                    let mut out = &bytes[..bytes.len()];
+                                    while !out.is_empty() {
+                                        match serial.write(out) {
+                                            Ok(len) => out = &out[len..],
+                                            // On error, just drop unwritten data.
+                                            // One possible error is Err(WouldBlock), meaning the USB
+                                            // write buffer is full.
+                                            Err(_) => break,
+                                        }
+                                    }
+                                }
+                            }
+                            DecodeResult::Command(command, target, value) => {
+                                let mut text: String<64> = String::new();
+                                writeln!(
+                                    &mut text,
+                                    "Run command: '{}' target: {} value: {}\r",
+                                    command, target, value
+                                )
+                                .unwrap();
+                                if command == Commands::Led {
+                                    led.rate = value as u64
+                                }
+                                let bytes = text.as_bytes();
+                                if !bytes.is_empty() {
+                                    // Send response to the host
+                                    let mut out = &bytes[..bytes.len()];
+                                    while !out.is_empty() {
+                                        match serial.write(out) {
+                                            Ok(len) => out = &out[len..],
+                                            // On error, just drop unwritten data.
+                                            // One possible error is Err(WouldBlock), meaning the USB
+                                            // write buffer is full.
+                                            Err(_) => break,
+                                        }
+                                    }
                                 }
                             }
                         }
