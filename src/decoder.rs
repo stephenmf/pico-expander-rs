@@ -19,10 +19,10 @@ impl fmt::Display for Commands {
 }
 
 enum DecodeState {
-    GetCommand,
-    GetTarget,
-    GetNextValue,
-    GetValue,
+    Command,
+    Target,
+    NextValue,
+    Value,
 }
 
 pub enum DecodeResult {
@@ -41,7 +41,7 @@ pub struct Decoder {
 impl Decoder {
     pub fn new() -> Decoder {
         Decoder {
-            state: DecodeState::GetCommand,
+            state: DecodeState::Command,
             target: 0,
             value: 0,
             command: Commands::Status,
@@ -49,15 +49,15 @@ impl Decoder {
     }
     pub fn run(&mut self, c: &u8) -> DecodeResult {
         match self.state {
-            DecodeState::GetCommand => match c {
+            DecodeState::Command => match c {
                 b's' | b'S' => return DecodeResult::Command(Commands::Status, 0, 0),
                 b'v' | b'V' => {
                     self.command = Commands::Valve;
-                    self.state = DecodeState::GetTarget
+                    self.state = DecodeState::Target
                 }
                 b'l' | b'L' => {
                     self.command = Commands::Led;
-                    self.state = DecodeState::GetNextValue
+                    self.state = DecodeState::NextValue
                 }
                 // ignore control codes.
                 0..=31 => {}
@@ -67,40 +67,40 @@ impl Decoder {
                     return DecodeResult::Text(text);
                 }
             },
-            DecodeState::GetTarget => match c {
+            DecodeState::Target => match c {
                 // Esc cancel command
-                27 => self.state = DecodeState::GetCommand,
+                27 => self.state = DecodeState::Command,
                 b'0'..=b'9' => {
                     self.target = c - b'0';
-                    self.state = DecodeState::GetNextValue
+                    self.state = DecodeState::NextValue
                 }
                 // ignore control codes.
                 0..=31 => {}
                 _ => {
                     let mut text: String<64> = String::new();
                     writeln!(&mut text, "Err: bad target '{}'\r", c).unwrap();
-                    self.state = DecodeState::GetCommand;
+                    self.state = DecodeState::Command;
                     return DecodeResult::Text(text);
                 }
             },
-            DecodeState::GetNextValue => match c {
+            DecodeState::NextValue => match c {
                 // Esc cancel command
-                27 => self.state = DecodeState::GetCommand,
+                27 => self.state = DecodeState::Command,
                 b'0'..=b'9' => {
                     self.value = (c - b'0') as u16;
-                    self.state = DecodeState::GetValue
+                    self.state = DecodeState::Value
                 }
                 _ => {}
             },
-            DecodeState::GetValue => match c {
+            DecodeState::Value => match c {
                 // Esc cancel command
-                27 => self.state = DecodeState::GetCommand,
+                27 => self.state = DecodeState::Command,
                 b'0'..=b'9' => {
                     self.value = self.value * 10 + (c - b'0') as u16;
-                    self.state = DecodeState::GetValue
+                    self.state = DecodeState::Value
                 }
                 _ => {
-                    self.state = DecodeState::GetCommand;
+                    self.state = DecodeState::Command;
                     return DecodeResult::Command(self.command, self.target, self.value);
                 }
             },

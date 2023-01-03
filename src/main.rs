@@ -96,7 +96,7 @@ fn main() -> ! {
     let mut serial = SerialPort::new(&usb_bus);
 
     // Create a USB device with a fake VID and PID
-    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0xCafe, 0x27dd))
+    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0xcafe, 0x27dd))
         .manufacturer("Field Home I/O")
         .product("Pico I/O Expander")
         .serial_number("00001")
