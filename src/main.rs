@@ -62,13 +62,8 @@ impl<'a, B: UsbBus> Usb<'a, B> {
             .device_class(2) // from: https://www.usb.org/defined-class-codes
             .build();
 
-        Usb {
-            device,
-            serial,
-        }
+        Usb { device, serial }
     }
-
-    
 }
 
 /// Entry point to our bare-metal application.
