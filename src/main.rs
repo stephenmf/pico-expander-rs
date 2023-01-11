@@ -44,11 +44,37 @@ use heapless::String;
 use decoder::{Commands, DecodeResult, Decoder};
 use led::Led;
 
+struct Usb<'a, B: UsbBus> {
+    device: UsbDevice<'a, B>,
+    serial: SerialPort<'a, B>,
+}
+
+impl<'a, B: UsbBus> Usb<'a, B> {
+    pub fn new(usb_bus: &'a UsbBusAllocator<B>) -> Usb<'a, B> {
+        // Set up the USB Communications Class Device driver
+        let serial = SerialPort::new(usb_bus);
+
+        // Create a USB device with a fake VID and PID
+        let device = UsbDeviceBuilder::new(usb_bus, UsbVidPid(0xcafe, 0x27dd))
+            .manufacturer("Field Home I/O")
+            .product("Pico I/O Expander")
+            .serial_number("00001")
+            .device_class(2) // from: https://www.usb.org/defined-class-codes
+            .build();
+
+        Usb {
+            device,
+            serial,
+        }
+    }
+
+    
+}
+
 /// Entry point to our bare-metal application.
 ///
 /// The `#[entry]` macro ensures the Cortex-M start-up code calls this function
 /// as soon as all global variables are initialised.
-
 #[entry]
 fn main() -> ! {
     // Grab our singleton objects
@@ -92,16 +118,18 @@ fn main() -> ! {
         &mut pac.RESETS,
     ));
 
-    // Set up the USB Communications Class Device driver
-    let mut serial = SerialPort::new(&usb_bus);
+    let mut usb = Usb::new(&usb_bus);
 
-    // Create a USB device with a fake VID and PID
-    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0xcafe, 0x27dd))
-        .manufacturer("Field Home I/O")
-        .product("Pico I/O Expander")
-        .serial_number("00001")
-        .device_class(2) // from: https://www.usb.org/defined-class-codes
-        .build();
+    // // Set up the USB Communications Class Device driver
+    // let mut serial = SerialPort::new(&usb_bus);
+
+    // // Create a USB device with a fake VID and PID
+    // let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0xcafe, 0x27dd))
+    //     .manufacturer("Field Home I/O")
+    //     .product("Pico I/O Expander")
+    //     .serial_number("00001")
+    //     .device_class(2) // from: https://www.usb.org/defined-class-codes
+    //     .build();
 
     // get the current timer value
     let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS);
@@ -122,9 +150,9 @@ fn main() -> ! {
             led.off();
         }
         // Check for new usb data
-        if usb_dev.poll(&mut [&mut serial]) {
+        if usb.device.poll(&mut [&mut usb.serial]) {
             let mut buf = [0u8; 64];
-            match serial.read(&mut buf) {
+            match usb.serial.read(&mut buf) {
                 Ok(0) => {
                     // Do nothing
                 }
@@ -142,7 +170,7 @@ fn main() -> ! {
                                     // Send response to the host
                                     let mut out = &bytes[..bytes.len()];
                                     while !out.is_empty() {
-                                        match serial.write(out) {
+                                        match usb.serial.write(out) {
                                             Ok(len) => out = &out[len..],
                                             // On error, just drop unwritten data.
                                             // One possible error is Err(WouldBlock), meaning the USB
@@ -168,7 +196,7 @@ fn main() -> ! {
                                     // Send response to the host
                                     let mut out = &bytes[..bytes.len()];
                                     while !out.is_empty() {
-                                        match serial.write(out) {
+                                        match usb.serial.write(out) {
                                             Ok(len) => out = &out[len..],
                                             // On error, just drop unwritten data.
                                             // One possible error is Err(WouldBlock), meaning the USB
