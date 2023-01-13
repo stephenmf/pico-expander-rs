@@ -1,7 +1,7 @@
 use core::{fmt, fmt::Write};
 use heapless::String;
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Commands {
     Status,
     Valve,

@@ -14,6 +14,7 @@
 
 mod decoder;
 mod led;
+mod usb;
 
 // use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
 
@@ -32,38 +33,30 @@ use rp_pico::hal::pac;
 // higher-level drivers.
 use rp_pico::hal;
 
-// USB Device support
-use usb_device::{class_prelude::*, prelude::*};
-
-// USB Communications Class Device support
-use usbd_serial::SerialPort;
+use usb_device::{class_prelude::*};
 
 use core::fmt::Write;
 use heapless::String;
 
 use decoder::{Commands, DecodeResult, Decoder};
 use led::Led;
+use usb::Usb;
 
-struct Usb<'a, B: UsbBus> {
-    device: UsbDevice<'a, B>,
-    serial: SerialPort<'a, B>,
-}
+fn run_command(led: &mut Led, command: Commands, target: u8, value: u16) -> String<64> {
+    let mut text: String<64> = String::new();
 
-impl<'a, B: UsbBus> Usb<'a, B> {
-    pub fn new(usb_bus: &'a UsbBusAllocator<B>) -> Usb<'a, B> {
-        // Set up the USB Communications Class Device driver
-        let serial = SerialPort::new(usb_bus);
-
-        // Create a USB device with a fake VID and PID
-        let device = UsbDeviceBuilder::new(usb_bus, UsbVidPid(0xcafe, 0x27dd))
-            .manufacturer("Field Home I/O")
-            .product("Pico I/O Expander")
-            .serial_number("00001")
-            .device_class(2) // from: https://www.usb.org/defined-class-codes
-            .build();
-
-        Usb { device, serial }
+    if command == Commands::Led {
+        led.rate = value as u64;
+        writeln!(&mut text, "LA\r").unwrap()
+    } else {
+        writeln!(
+            &mut text,
+            "run_command(command: '{}' target: {} value: {})\r",
+            command, target, value
+        )
+        .unwrap()
     }
+    text
 }
 
 /// Entry point to our bare-metal application.
@@ -78,9 +71,7 @@ fn main() -> ! {
     // Set up the watchdog driver - needed by the clock setup code
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
 
-    // Configure the clocks
-    //
-    // The default is to generate a 125 MHz system clock
+    // Configure the clocks generate a 125 MHz system clock
     let clocks = hal::clocks::init_clocks_and_plls(
         rp_pico::XOSC_CRYSTAL_FREQ,
         pac.XOSC,
@@ -113,94 +104,29 @@ fn main() -> ! {
         &mut pac.RESETS,
     ));
 
-    let mut usb = Usb::new(&usb_bus);
-
-    // // Set up the USB Communications Class Device driver
-    // let mut serial = SerialPort::new(&usb_bus);
-
-    // // Create a USB device with a fake VID and PID
-    // let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0xcafe, 0x27dd))
-    //     .manufacturer("Field Home I/O")
-    //     .product("Pico I/O Expander")
-    //     .serial_number("00001")
-    //     .device_class(2) // from: https://www.usb.org/defined-class-codes
-    //     .build();
-
-    // get the current timer value
     let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS);
-    let mut now = timer.get_counter();
-
-    let mut led = Led::new(pins.led.into_push_pull_output());
-
+    let mut usb = Usb::new(&usb_bus);
+    let mut led = Led::new(pins.led.into_push_pull_output(), timer.get_counter());
     let mut decoder = Decoder::new();
+
     loop {
-        // blink the led
-        if led.rate > 0 {
-            let check = timer.get_counter();
-            if (check - now).to_millis() > led.rate {
-                led.toggle();
-                now = check;
-            }
-        } else {
-            led.off();
-        }
-        // Check for new usb data
-        if usb.device.poll(&mut [&mut usb.serial]) {
-            let mut buf = [0u8; 64];
-            match usb.serial.read(&mut buf) {
-                Ok(0) => {
-                    // Do nothing
-                }
-                Err(_e) => {
-                    // Do Nothing
-                }
-                Ok(count) => {
-                    // Decode the input
-                    for c in buf.iter().take(count) {
-                        match decoder.run(c) {
-                            DecodeResult::None => {}
-                            DecodeResult::Text(text) => {
-                                let bytes = text.as_bytes();
-                                if !bytes.is_empty() {
-                                    // Send response to the host
-                                    let mut out = &bytes[..bytes.len()];
-                                    while !out.is_empty() {
-                                        match usb.serial.write(out) {
-                                            Ok(len) => out = &out[len..],
-                                            // On error, just drop unwritten data.
-                                            // One possible error is Err(WouldBlock), meaning the USB
-                                            // write buffer is full.
-                                            Err(_) => break,
-                                        }
-                                    }
-                                }
-                            }
-                            DecodeResult::Command(command, target, value) => {
-                                let mut text: String<64> = String::new();
-                                writeln!(
-                                    &mut text,
-                                    "Run command: '{}' target: {} value: {}\r",
-                                    command, target, value
-                                )
-                                .unwrap();
-                                if command == Commands::Led {
-                                    led.rate = value as u64
-                                }
-                                let bytes = text.as_bytes();
-                                if !bytes.is_empty() {
-                                    // Send response to the host
-                                    let mut out = &bytes[..bytes.len()];
-                                    while !out.is_empty() {
-                                        match usb.serial.write(out) {
-                                            Ok(len) => out = &out[len..],
-                                            // On error, just drop unwritten data.
-                                            // One possible error is Err(WouldBlock), meaning the USB
-                                            // write buffer is full.
-                                            Err(_) => break,
-                                        }
-                                    }
-                                }
-                            }
+        let now = timer.get_counter();
+        led.run(&now);
+        let mut usb_buffer = [0u8; 64];
+        match usb.read(&mut usb_buffer) {
+            Ok(0) => {}
+            Err(_e) => {}
+            Ok(count) => {
+                // Decode the input
+                for c in usb_buffer.iter().take(count) {
+                    match decoder.run(c) {
+                        DecodeResult::None => {}
+                        DecodeResult::Text(text) => {
+                            usb.write(&text);
+                        }
+                        DecodeResult::Command(command, target, value) => {
+                            let text = run_command(&mut led, command, target, value);
+                            usb.write(&text);
                         }
                     }
                 }
