@@ -31,9 +31,9 @@ use rp_pico::hal::pac;
 
 // A shorter alias for the Hardware Abstraction Layer, which provides
 // higher-level drivers.
-use rp_pico::hal;
+use rp_pico::{hal, hal::Timer};
 
-use usb_device::{class_prelude::*};
+use usb_device::class_prelude::*;
 
 use core::fmt::Write;
 use heapless::String;
@@ -42,11 +42,17 @@ use decoder::{Commands, DecodeResult, Decoder};
 use led::Led;
 use usb::Usb;
 
-fn run_command(led: &mut Led, command: Commands, target: u8, value: u16) -> String<64> {
+struct Io<'a, B: UsbBus> {
+    timer: Timer,
+    led: Led,
+    usb: Usb<'a, B>,
+}
+
+fn run_command<B: UsbBus>(io: &mut Io<B>, command: Commands, target: u8, value: u16) -> String<64> {
     let mut text: String<64> = String::new();
 
     if command == Commands::Led {
-        led.rate = value as u64;
+        io.led.rate = value as u64;
         writeln!(&mut text, "LA\r").unwrap()
     } else {
         writeln!(
@@ -105,29 +111,26 @@ fn main() -> ! {
     ));
 
     let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS);
-    let mut usb = Usb::new(&usb_bus);
-    let mut led = Led::new(pins.led.into_push_pull_output(), timer.get_counter());
+    let usb = Usb::new(&usb_bus);
+    let led = Led::new(pins.led.into_push_pull_output(), timer.get_counter());
+    let mut io = Io { timer, led, usb };
     let mut decoder = Decoder::new();
 
     loop {
-        let now = timer.get_counter();
-        led.run(&now);
+        let now = io.timer.get_counter();
+        io.led.run(&now);
         let mut usb_buffer = [0u8; 64];
-        match usb.read(&mut usb_buffer) {
-            Ok(0) => {}
-            Err(_e) => {}
-            Ok(count) => {
-                // Decode the input
-                for c in usb_buffer.iter().take(count) {
-                    match decoder.run(c) {
-                        DecodeResult::None => {}
-                        DecodeResult::Text(text) => {
-                            usb.write(&text);
-                        }
-                        DecodeResult::Command(command, target, value) => {
-                            let text = run_command(&mut led, command, target, value);
-                            usb.write(&text);
-                        }
+        if let Some(count) = io.usb.read(&mut usb_buffer) {
+            // Decode the input
+            for c in usb_buffer.iter().take(count) {
+                match decoder.run(c) {
+                    DecodeResult::None => {}
+                    DecodeResult::Text(text) => {
+                        io.usb.write(&text);
+                    }
+                    DecodeResult::Command(command, target, value) => {
+                        let text = run_command(&mut io, command, target, value);
+                        io.usb.write(&text);
                     }
                 }
             }
