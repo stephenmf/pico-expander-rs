@@ -1,6 +1,6 @@
+use heapless::String;
 use usb_device::{class_prelude::*, prelude::*};
 use usbd_serial::SerialPort;
-use heapless::String;
 
 pub struct Usb<'a, B: UsbBus> {
     device: UsbDevice<'a, B>,
@@ -23,12 +23,16 @@ impl<'a, B: UsbBus> Usb<'a, B> {
         Usb { device, serial }
     }
 
-    pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, UsbError> {
+    pub fn read(&mut self, buffer: &mut [u8]) -> Option<usize> {
+        //Result<usize, UsbError> {
         if self.device.poll(&mut [&mut self.serial]) {
-            self.serial.read(buffer)
-        } else {
-            Ok(0)
+            match self.serial.read(buffer) {
+                Ok(0) => {}
+                Err(_e) => {}
+                Ok(count) => return Some(count),
+            }
         }
+        None
     }
 
     pub fn write(&mut self, text: &String<64>) {
