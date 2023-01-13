@@ -1,13 +1,13 @@
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
-use rp_pico::hal;
 use hal::timer::Instant;
+use rp_pico::hal;
 
 type LedPin = hal::gpio::Pin<hal::gpio::bank0::Gpio25, hal::gpio::Output<hal::gpio::PushPull>>;
 
 pub struct Led {
     pin: LedPin,
     pub rate: u64,
-    last: Instant
+    last: Instant,
 }
 
 impl Led {
