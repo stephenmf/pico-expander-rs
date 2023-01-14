@@ -17,9 +17,10 @@ panic-halt = "0.2"
 rp-pico = "0.6"
 
 # extra for usb serial example
+fugit = "0.3.6"
+heapless = "0.7"
 usb-device = "0.2.9"
 usbd-serial = "0.1"
-heapless = "0.7"
 
 # cargo build/run
 [profile.dev]

@@ -1,19 +1,26 @@
+// Use alias bsp so we can switch boards at a single location
+use rp_pico as bsp;
+
+use bsp::hal::{
+    gpio::{Output, Pin, PinId, PushPull},
+    timer::Instant,
+};
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
-use hal::timer::Instant;
-use rp_pico::hal;
 
-type LedPin = hal::gpio::Pin<hal::gpio::bank0::Gpio25, hal::gpio::Output<hal::gpio::PushPull>>;
-
-pub struct Led {
-    pin: LedPin,
+pub struct Led<I: PinId> {
+    pin: Pin<I, Output<PushPull>>,
     pub rate: u64,
     last: Instant,
 }
 
-impl Led {
-    pub fn new(pin: LedPin, last: Instant) -> Led {
+impl<I: PinId> Led<I> {
+    pub fn new(pin: Pin<I, Output<PushPull>>) -> Led<I> {
         let rate: u64 = 500;
-        Led { pin, rate, last }
+        Led {
+            pin,
+            rate,
+            last: Instant::from_ticks(0),
+        }
     }
 
     pub fn run(&mut self, now: &Instant) {
@@ -36,7 +43,7 @@ impl Led {
         self.pin.set_low().unwrap();
     }
 
-    fn is_on(&self) -> bool {
+    pub fn is_on(&self) -> bool {
         self.pin.is_set_high().unwrap()
     }
 
