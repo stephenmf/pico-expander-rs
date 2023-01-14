@@ -184,7 +184,7 @@ fn command<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
         io.led.rate = value as u64;
         writeln!(&mut text, "LA\r").unwrap()
     } else if cmd == Commands::Status {
-        writeln!(&mut text, "SLv{}r{}\r", io.led.is_on(), io.led.rate).unwrap()
+        writeln!(&mut text, "SLv{}r{}\r", io.led.is_on() as i32, io.led.rate).unwrap()
     } else {
         writeln!(
             &mut text,
