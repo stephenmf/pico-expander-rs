@@ -12,6 +12,7 @@
 #![no_std]
 #![no_main]
 
+mod console;
 mod decoder;
 mod led;
 mod usb;
@@ -34,35 +35,23 @@ use bsp::{
         clocks::Clock,
         gpio::{FunctionUart, PinId},
         pac,
-        uart::{
-            DataBits, Enabled, StopBits, UartConfig, UartDevice, UartPeripheral, ValidUartPinout,
-        },
+        uart::{UartDevice, UartPeripheral, ValidUartPinout},
         usb::UsbBus as HalUsbBus,
         Sio, Timer, Watchdog,
     },
     Pins,
 };
 
-use fugit::RateExtU32;
 use usb_device::class_prelude::*;
 
 use core::fmt::Write;
 use heapless::String;
 
 // Local modules.
+use console::Console;
 use decoder::{Commands, DecodeResult, Decoder};
 use led::Led;
 use usb::Usb;
-
-struct Console<D: UartDevice, P: ValidUartPinout<D>> {
-    uart: UartPeripheral<Enabled, D, P>,
-}
-
-impl<D: UartDevice, P: ValidUartPinout<D>> Console<D, P> {
-    fn new(uart: UartPeripheral<Enabled, D, P>) -> Console<D, P> {
-        Console { uart }
-    }
-}
 
 struct Io<'a, B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>> {
     timer: Timer,
@@ -123,15 +112,11 @@ fn main() -> ! {
         ),
         &mut pac.RESETS,
     );
-    let uart = uart.enable(
-        UartConfig::new(115200.Hz(), DataBits::Eight, None, StopBits::One),
-        clocks.peripheral_clock.freq(),
-    );
 
     let io = Io {
         timer: Timer::new(pac.TIMER, &mut pac.RESETS),
         led: Led::new(pins.led.into_push_pull_output()),
-        console: Console::new(uart.unwrap()),
+        console: Console::new(uart, clocks.peripheral_clock.freq()),
         usb: Usb::new(&usb_bus),
     };
     forever(io);
@@ -142,6 +127,7 @@ fn forever<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
 ) -> ! {
     let mut decoder = Decoder::new();
     let mut usb_buffer = [0u8; 64];
+    let mut text_buffer: String<64> = String::new();
     let mut uart_buffer = [0u8; 16];
     loop {
         let now = io.timer.get_counter();
@@ -149,24 +135,26 @@ fn forever<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
         if let Some(count) = io.usb.read(&mut usb_buffer) {
             // Decode the input
             for c in usb_buffer.iter().take(count) {
-                match decoder.run(c) {
+                match decoder.run(&mut text_buffer, c) {
                     DecodeResult::None => {}
-                    DecodeResult::Text(text) => {
-                        io.usb.write(&text);
+                    DecodeResult::Text(0) => {}
+                    DecodeResult::Text(_count) => {
+                        io.usb.write(&text_buffer);
                     }
                     DecodeResult::Command(cmd, target, value) => {
-                        let text = command(&mut io, cmd, target, value);
-                        io.usb.write(&text);
+                        if command(&mut io, &mut text_buffer, cmd, target, value) > 0 {
+                            io.usb.write(&text_buffer);
+                        }
                     }
                 }
             }
         }
-        if io.console.uart.uart_is_readable() {
-            match io.console.uart.read_raw(&mut uart_buffer) {
-                Ok(0) => {}
-                Err(_) => {}
-                // Echo the input for now.
-                Ok(_count) => if let Ok(_count) = io.console.uart.write_raw(&uart_buffer) {},
+        match io.console.read(&mut uart_buffer) {
+            None => {}
+            Some(0) => {}
+            // Echo the input for now.
+            Some(_count) => {
+                io.console.write(&uart_buffer);
             }
         }
     }
@@ -174,26 +162,25 @@ fn forever<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
 
 fn command<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
     io: &mut Io<B, LP, D, P>,
+    text: &mut String<64>,
     cmd: Commands,
     target: u8,
     value: u16,
-) -> String<64> {
-    let mut text: String<64> = String::new();
-
+) -> usize {
     if cmd == Commands::Led {
         io.led.rate = value as u64;
-        writeln!(&mut text, "LA\r").unwrap()
+        writeln!(text, "LA\r").unwrap()
     } else if cmd == Commands::Status {
-        writeln!(&mut text, "SLv{}r{}\r", io.led.is_on() as i32, io.led.rate).unwrap()
+        writeln!(text, "SLv{}r{}\r", io.led.is_on() as i32, io.led.rate).unwrap()
     } else {
         writeln!(
-            &mut text,
+            text,
             "run_command(command: '{}' target: {} value: {})\r",
             cmd, target, value
         )
         .unwrap()
     }
-    text
+    text.len()
 }
 
 // End of file

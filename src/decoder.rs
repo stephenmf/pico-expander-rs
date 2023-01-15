@@ -27,7 +27,7 @@ enum DecodeState {
 
 pub enum DecodeResult {
     None,
-    Text(String<64>),
+    Text(usize),
     Command(Commands, u8, u16),
 }
 
@@ -47,7 +47,7 @@ impl Decoder {
             command: Commands::Status,
         }
     }
-    pub fn run(&mut self, c: &u8) -> DecodeResult {
+    pub fn run(&mut self, text: &mut String<64>, c: &u8) -> DecodeResult {
         match self.state {
             DecodeState::Command => match c {
                 b's' | b'S' => return DecodeResult::Command(Commands::Status, 0, 0),
@@ -62,9 +62,8 @@ impl Decoder {
                 // ignore control codes.
                 0..=31 => {}
                 _ => {
-                    let mut text: String<64> = String::new();
-                    writeln!(&mut text, "Err: unrecognised '{}'\r", c).unwrap();
-                    return DecodeResult::Text(text);
+                    writeln!(text, "Err: unrecognised '{}'\r", c).unwrap();
+                    return DecodeResult::Text(text.len());
                 }
             },
             DecodeState::Target => match c {
@@ -77,10 +76,9 @@ impl Decoder {
                 // ignore control codes.
                 0..=31 => {}
                 _ => {
-                    let mut text: String<64> = String::new();
-                    writeln!(&mut text, "Err: bad target '{}'\r", c).unwrap();
+                    writeln!(text, "Err: bad target '{}'\r", c).unwrap();
                     self.state = DecodeState::Command;
-                    return DecodeResult::Text(text);
+                    return DecodeResult::Text(text.len());
                 }
             },
             DecodeState::NextValue => match c {
