@@ -133,6 +133,7 @@ fn forever<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
         let now = io.timer.get_counter();
         io.led.run(&now);
         if let Some(count) = io.usb.read(&mut usb_buffer) {
+            text_buffer.clear();
             // Decode the input
             for c in usb_buffer.iter().take(count) {
                 match decoder.run(&mut text_buffer, c) {
