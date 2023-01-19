@@ -127,7 +127,6 @@ fn forever<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
 ) -> ! {
     let mut decoder = Decoder::new();
     let mut usb_buffer = [0u8; 64];
-    let mut text_buffer: String<64> = String::new();
     let mut uart_buffer = [0u8; 16];
     loop {
         let now = io.timer.get_counter();
@@ -135,16 +134,16 @@ fn forever<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
         if let Some(count) = io.usb.read(&mut usb_buffer) {
             // Decode the input
             for c in usb_buffer.iter().take(count) {
-                text_buffer.clear();
-                match decoder.run(&mut text_buffer, c) {
+                match decoder.run(c) {
                     DecodeResult::None => {}
-                    DecodeResult::Text(0) => {}
-                    DecodeResult::Text(_count) => {
-                        io.usb.write(&text_buffer);
+                    DecodeResult::Text(text) => {
+                        if text.len() > 0 {
+                            io.usb.write(&text);
+                        }
                     }
                     DecodeResult::Command(cmd, target, value) => {
-                        if command(&mut io, &mut text_buffer, cmd, target, value) > 0 {
-                            io.usb.write(&text_buffer);
+                        if let Some(text) = command(&mut io, cmd, target, value) {
+                            io.usb.write(&text);
                         }
                     }
                 }
@@ -163,25 +162,27 @@ fn forever<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
 
 fn command<B: UsbBus, LP: PinId, D: UartDevice, P: ValidUartPinout<D>>(
     io: &mut Io<B, LP, D, P>,
-    text: &mut String<64>,
     cmd: Commands,
     target: u8,
     value: u16,
-) -> usize {
+) -> Option<String<64>> {
+    let mut text: String<64> = String::new();
     if cmd == Commands::Led {
         io.led.rate = value as u64;
-        writeln!(text, "LA\r").unwrap()
+        writeln!(text, "LA\r").unwrap();
+        Some(text)
     } else if cmd == Commands::Status {
-        writeln!(text, "SLv{}r{}\r", io.led.is_on() as i32, io.led.rate).unwrap()
+        writeln!(text, "SLv{}r{}\r", io.led.is_on() as i32, io.led.rate).unwrap();
+        Some(text)
     } else {
         writeln!(
             text,
             "run_command(command: '{}' target: {} value: {})\r",
             cmd, target, value
         )
-        .unwrap()
+        .unwrap();
+        Some(text)
     }
-    text.len()
 }
 
 // End of file
